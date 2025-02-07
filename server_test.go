@@ -1,0 +1,177 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/google/uuid"
+)
+
+func TestProcessingReceiptsAndFetchingThem(t *testing.T) {
+	morningReceipt := `{
+		"retailer": "Walgreens",
+		"purchaseDate": "2022-01-02",
+		"purchaseTime": "08:13",
+		"total": "2.65",
+		"items": [
+			{"shortDescription": "Pepsi - 12-oz", "price": "1.25"},
+			{"shortDescription": "Dasani", "price": "1.40"}
+		]
+	}`
+
+	simpleReceipt := `{
+		"retailer": "Target",
+		"purchaseDate": "2022-01-02",
+		"purchaseTime": "13:13",
+		"total": "1.25",
+		"items": [
+			{"shortDescription": "Pepsi - 12-oz", "price": "1.25"}
+		]
+	}`
+
+	store := NewReceiptStore()
+	server := NewReceiptServer(store)
+
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, newPostReceiptRequest(morningReceipt))
+	assertResponseCode(t, response.Code, http.StatusOK)
+	var firstId ID
+	err := json.NewDecoder(response.Body).Decode(&firstId)
+	checkDecodeErr(t, response, err)
+
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, newPostReceiptRequest(simpleReceipt))
+	assertResponseCode(t, response.Code, http.StatusOK)
+	var secondId ID
+	err = json.NewDecoder(response.Body).Decode(&secondId)
+	checkDecodeErr(t, response, err)
+
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, newGetPointsRequest(firstId.Id))
+	assertResponseCode(t, response.Code, http.StatusOK)
+	assertPointTotalInResponse(t, response, 5)
+
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, newGetPointsRequest(secondId.Id))
+	assertResponseCode(t, response.Code, http.StatusOK)
+	assertPointTotalInResponse(t, response, 5)
+}
+
+func TestGetReceiptPoints(t *testing.T) {
+	store := NewReceiptStore()
+	id := uuid.New()
+	store.receipts[id] = ReceiptScore{Id: id, Receipt: Receipt{}, Points: 100}
+	server := NewReceiptServer(store)
+
+	t.Run("returns receipt points", func(t *testing.T) {
+		request := newGetPointsRequest(id)
+		response := httptest.NewRecorder()
+
+		server.ServeHTTP(response, request)
+
+		assertResponseCode(t, response.Code, http.StatusOK)
+		assertContentType(t, response.Header(), "application/json")
+		assertPointTotalInResponse(t, response, 100)
+	})
+
+	t.Run("request is made with id for non-existent receipt", func(t *testing.T) {
+		request := newGetPointsRequest(uuid.New())
+		response := httptest.NewRecorder()
+
+		server.ServeHTTP(response, request)
+
+		assertResponseCode(t, response.Code, http.StatusNotFound)
+		assertEmptyResponse(t, response.Body)
+	})
+}
+
+func TestProcessReceipt(t *testing.T) {
+	store := NewReceiptStore()
+	server := NewReceiptServer(store)
+	receiptJson := `{
+    "retailer": "Walgreens",
+    "purchaseDate": "2022-01-02",
+    "purchaseTime": "08:13",
+    "total": "2.65",
+    "items": [
+        {"shortDescription": "Pepsi - 12-oz", "price": "1.25"},
+        {"shortDescription": "Dasani", "price": "1.40"}
+    ]
+}`
+
+	t.Run("accepts POST of a new receipt", func(t *testing.T) {
+		request := newPostReceiptRequest(receiptJson)
+		response := httptest.NewRecorder()
+
+		server.ServeHTTP(response, request)
+
+		assertResponseCode(t, response.Code, http.StatusOK)
+		assertContentType(t, response.Header(), "application/json")
+
+		var id ID
+		err := json.NewDecoder(response.Body).Decode(&id)
+		checkDecodeErr(t, response, err)
+		savedReceipt, ok := store.receipts[id.Id]
+		if !ok {
+			t.Errorf("receipt was not saved during POST request")
+		}
+		if savedReceipt.Id != id.Id {
+			t.Errorf("ReceiptScore did not properly record receipt ID")
+		}
+	})
+}
+
+func newPostReceiptRequest(receipt string) *http.Request {
+	body := []byte(receipt)
+	req, _ := http.NewRequest(http.MethodPost, "/receipts/process", bytes.NewReader(body))
+	return req
+}
+
+func newGetPointsRequest(id uuid.UUID) *http.Request {
+	path := "/receipts/" + id.String() + "/points"
+	req, _ := http.NewRequest(http.MethodGet, path, nil)
+	return req
+}
+
+func assertPointTotalInResponse(t testing.TB, response *httptest.ResponseRecorder, expected int) {
+	t.Helper()
+	var points Points
+	err := json.NewDecoder(response.Body).Decode(&points)
+	checkDecodeErr(t, response, err)
+	if points.Points != expected {
+		t.Errorf("expected points total of %d but got %d", expected, points.Points)
+	}
+}
+
+func assertContentType(t testing.TB, header http.Header, want string) {
+	t.Helper()
+	got := header.Get("Content-Type")
+
+	if got != want {
+		t.Errorf("expected Content-Type Header of %q but got %q", want, got)
+	}
+}
+
+func assertResponseCode(t testing.TB, got, want int) {
+	t.Helper()
+	if got != want {
+		t.Errorf("expect response code of %d but got %d", want, got)
+	}
+}
+
+func assertEmptyResponse(t testing.TB, body *bytes.Buffer) {
+	t.Helper()
+	if body.Len() != 0 {
+		t.Errorf("expected empty response body but receievd a body in the response")
+	}
+}
+
+func checkDecodeErr(t testing.TB, response *httptest.ResponseRecorder, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("Unable to parse response into ID. resp: %q, err: %v", response.Body, err)
+	}
+}
