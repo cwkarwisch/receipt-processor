@@ -11,39 +11,65 @@ import (
 )
 
 func TestProcessingReceiptsAndFetchingThem(t *testing.T) {
-	morningReceipt := `{
-		"retailer": "Walgreens",
-		"purchaseDate": "2022-01-02",
-		"purchaseTime": "08:13",
-		"total": "2.65",
-		"items": [
-			{"shortDescription": "Pepsi - 12-oz", "price": "1.25"},
-			{"shortDescription": "Dasani", "price": "1.40"}
-		]
-	}`
-
-	simpleReceipt := `{
+	targetReceipt := `{
 		"retailer": "Target",
-		"purchaseDate": "2022-01-02",
-		"purchaseTime": "13:13",
-		"total": "1.25",
+		"purchaseDate": "2022-01-01",
+		"purchaseTime": "13:01",
 		"items": [
-			{"shortDescription": "Pepsi - 12-oz", "price": "1.25"}
-		]
-	}`
+			{
+			"shortDescription": "Mountain Dew 12PK",
+			"price": "6.49"
+			},{
+			"shortDescription": "Emils Cheese Pizza",
+			"price": "12.25"
+			},{
+			"shortDescription": "Knorr Creamy Chicken",
+			"price": "1.26"
+			},{
+			"shortDescription": "Doritos Nacho Cheese",
+			"price": "3.35"
+			},{
+			"shortDescription": "   Klarbrunn 12-PK 12 FL OZ  ",
+			"price": "12.00"
+			}
+		],
+		"total": "35.35"
+		}`
+
+	cornerMarketReceipt := `{
+		"retailer": "M&M Corner Market",
+		"purchaseDate": "2022-03-20",
+		"purchaseTime": "14:33",
+		"items": [
+			{
+			"shortDescription": "Gatorade",
+			"price": "2.25"
+			},{
+			"shortDescription": "Gatorade",
+			"price": "2.25"
+			},{
+			"shortDescription": "Gatorade",
+			"price": "2.25"
+			},{
+			"shortDescription": "Gatorade",
+			"price": "2.25"
+			}
+		],
+		"total": "9.00"
+		}`
 
 	store := NewReceiptStore()
 	server := NewReceiptServer(store)
 
 	response := httptest.NewRecorder()
-	server.ServeHTTP(response, newPostReceiptRequest(morningReceipt))
+	server.ServeHTTP(response, newPostReceiptRequest(targetReceipt))
 	assertResponseCode(t, response.Code, http.StatusOK)
 	var firstId ID
 	err := json.NewDecoder(response.Body).Decode(&firstId)
 	checkDecodeErr(t, response, err)
 
 	response = httptest.NewRecorder()
-	server.ServeHTTP(response, newPostReceiptRequest(simpleReceipt))
+	server.ServeHTTP(response, newPostReceiptRequest(cornerMarketReceipt))
 	assertResponseCode(t, response.Code, http.StatusOK)
 	var secondId ID
 	err = json.NewDecoder(response.Body).Decode(&secondId)
@@ -52,12 +78,12 @@ func TestProcessingReceiptsAndFetchingThem(t *testing.T) {
 	response = httptest.NewRecorder()
 	server.ServeHTTP(response, newGetPointsRequest(firstId.Id))
 	assertResponseCode(t, response.Code, http.StatusOK)
-	assertPointTotalInResponse(t, response, 5)
+	assertPointTotalInResponse(t, response, 28)
 
 	response = httptest.NewRecorder()
 	server.ServeHTTP(response, newGetPointsRequest(secondId.Id))
 	assertResponseCode(t, response.Code, http.StatusOK)
-	assertPointTotalInResponse(t, response, 5)
+	assertPointTotalInResponse(t, response, 109)
 }
 
 func TestGetReceiptPoints(t *testing.T) {
@@ -126,7 +152,8 @@ func TestProcessReceipt(t *testing.T) {
 	t.Run("rejects receipt with missing retailer", func(t *testing.T) {
 		receiptJson = `{
 			"retailer": "",
-			"purchaseDate": "2022-01-02",
+			"purchaseDate": "2022-05-27",
+			"purchaseTime": "02:00",
 			"total": "3.29",
 			"items": [
 				{"shortDescription": "Pepsi - 12-oz", "price": "1.25"},
@@ -146,7 +173,7 @@ func TestProcessReceipt(t *testing.T) {
 	t.Run("rejects receipt with missing items", func(t *testing.T) {
 		receiptJson = `{
 			"retailer": "Walgreens",
-			"purchaseDate": "2022-01-02",
+			"purchaseDate": "2022-11-11",
 			"total": "3.29"
 		}`
 
@@ -162,7 +189,7 @@ func TestProcessReceipt(t *testing.T) {
 	t.Run("rejects receipt with invalid formatting for a field", func(t *testing.T) {
 		receiptJson = `{
 			"retailer": "Walgreens",
-			"purchaseDate": "2022-01-02",
+			"purchaseDate": "2022-02-28",
 			"purchaseTime": "08:13",
 			"total": "3",
 			"items": [
@@ -183,7 +210,8 @@ func TestProcessReceipt(t *testing.T) {
 	t.Run("rejects receipt with missing short description", func(t *testing.T) {
 		receiptJson = `{
 			"retailer": "Walgreens",
-			"purchaseDate": "2022-01-02",
+			"purchaseDate": "2022-09-20",
+			"purchaseTime": "12:01",
 			"total": "3.29",
 			"items": [
 				{"shortDescription": "", "price": "1.25"},
@@ -203,11 +231,159 @@ func TestProcessReceipt(t *testing.T) {
 	t.Run("rejects receipt with missing item price", func(t *testing.T) {
 		receiptJson = `{
 			"retailer": "Walgreens",
-			"purchaseDate": "2022-01-02",
+			"purchaseDate": "2022-12-31",
+			"purchaseTime": "23:50",
 			"total": "3.29",
 			"items": [
 				{"shortDescription": "Pepsi - 12-oz", "price": "1.25"},
 				{"shortDescription": "Dasani", "price": ""}
+			]
+		}`
+
+		request := newPostReceiptRequest(receiptJson)
+		response := httptest.NewRecorder()
+
+		server.ServeHTTP(response, request)
+
+		assertResponseCode(t, response.Code, http.StatusBadRequest)
+		assertResponseBody(t, response.Body.String(), badRequestMessage+"\n")
+	})
+
+	t.Run("rejects receipt with invalid date format", func(t *testing.T) {
+		receiptJson = `{
+			"retailer": "Walgreens",
+			"purchaseDate": "202-01-02",
+			"purchaseTime": "08:13",
+			"total": "3.15",
+			"items": [
+				{"shortDescription": "Pepsi - 12-oz", "price": "1.25"},
+				{"shortDescription": "Dasani", "price": "1.40"}
+			]
+		}`
+
+		request := newPostReceiptRequest(receiptJson)
+		response := httptest.NewRecorder()
+
+		server.ServeHTTP(response, request)
+
+		assertResponseCode(t, response.Code, http.StatusBadRequest)
+		assertResponseBody(t, response.Body.String(), badRequestMessage+"\n")
+	})
+
+	t.Run("rejects receipt with invalid month in date format", func(t *testing.T) {
+		receiptJson = `{
+			"retailer": "Walgreens",
+			"purchaseDate": "2000-13-02",
+			"purchaseTime": "08:13",
+			"total": "3.15",
+			"items": [
+				{"shortDescription": "Pepsi - 12-oz", "price": "1.25"},
+				{"shortDescription": "Dasani", "price": "1.40"}
+			]
+		}`
+
+		request := newPostReceiptRequest(receiptJson)
+		response := httptest.NewRecorder()
+
+		server.ServeHTTP(response, request)
+
+		assertResponseCode(t, response.Code, http.StatusBadRequest)
+		assertResponseBody(t, response.Body.String(), badRequestMessage+"\n")
+	})
+
+	t.Run("rejects receipt with 00 month in date format", func(t *testing.T) {
+		receiptJson = `{
+			"retailer": "Walgreens",
+			"purchaseDate": "2000-00-02",
+			"purchaseTime": "08:13",
+			"total": "3.15",
+			"items": [
+				{"shortDescription": "Pepsi - 12-oz", "price": "1.25"},
+				{"shortDescription": "Dasani", "price": "1.40"}
+			]
+		}`
+
+		request := newPostReceiptRequest(receiptJson)
+		response := httptest.NewRecorder()
+
+		server.ServeHTTP(response, request)
+
+		assertResponseCode(t, response.Code, http.StatusBadRequest)
+		assertResponseBody(t, response.Body.String(), badRequestMessage+"\n")
+	})
+
+	t.Run("rejects receipt with invalid day field in date format", func(t *testing.T) {
+		receiptJson = `{
+			"retailer": "Walgreens",
+			"purchaseDate": "1024-10-32",
+			"purchaseTime": "08:13",
+			"total": "3.15",
+			"items": [
+				{"shortDescription": "Pepsi - 12-oz", "price": "1.25"},
+				{"shortDescription": "Dasani", "price": "1.40"}
+			]
+		}`
+
+		request := newPostReceiptRequest(receiptJson)
+		response := httptest.NewRecorder()
+
+		server.ServeHTTP(response, request)
+
+		assertResponseCode(t, response.Code, http.StatusBadRequest)
+		assertResponseBody(t, response.Body.String(), badRequestMessage+"\n")
+	})
+
+	t.Run("rejects receipt with invalid time format", func(t *testing.T) {
+		receiptJson = `{
+			"retailer": "Walgreens",
+			"purchaseDate": "2021-01-02",
+			"purchaseTime": "0:13",
+			"total": "3.15",
+			"items": [
+				{"shortDescription": "Pepsi - 12-oz", "price": "1.25"},
+				{"shortDescription": "Dasani", "price": "1.40"}
+			]
+		}`
+
+		request := newPostReceiptRequest(receiptJson)
+		response := httptest.NewRecorder()
+
+		server.ServeHTTP(response, request)
+
+		assertResponseCode(t, response.Code, http.StatusBadRequest)
+		assertResponseBody(t, response.Body.String(), badRequestMessage+"\n")
+	})
+
+	t.Run("rejects receipt with a different invalid time format", func(t *testing.T) {
+		receiptJson = `{
+			"retailer": "Walgreens",
+			"purchaseDate": "2021-01-02",
+			"purchaseTime": "12:60",
+			"total": "3.15",
+			"items": [
+				{"shortDescription": "Pepsi - 12-oz", "price": "1.25"},
+				{"shortDescription": "Dasani", "price": "1.40"}
+			]
+		}`
+
+		request := newPostReceiptRequest(receiptJson)
+		response := httptest.NewRecorder()
+
+		server.ServeHTTP(response, request)
+
+		assertResponseCode(t, response.Code, http.StatusBadRequest)
+		assertResponseBody(t, response.Body.String(), badRequestMessage+"\n")
+	})
+
+	t.Run("rejects receipt with a final invalid time format", func(t *testing.T) {
+		receiptJson = `{
+			"retailer": "Walgreens",
+			"purchaseDate": "2021-01-02",
+			"purchaseTime": "77:77",
+			"total": "3.15",
+			"items": [
+				{"shortDescription": "Pepsi - 12-oz", "price": "1.25"},
+				{"shortDescription": "Dasani", "price": "1.40"}
 			]
 		}`
 

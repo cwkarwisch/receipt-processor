@@ -5,9 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"reflect"
 	"regexp"
+	"strconv"
+	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/google/uuid"
 )
@@ -20,8 +24,8 @@ type ReceiptScore struct {
 
 type Receipt struct {
 	Retailer     string `regex:"^[\\w\\s\\-&]+$"`
-	PurchaseDate string
-	PurchaseTime string
+	PurchaseDate string `regex:"^\\d{4}-0[1-9]|1[1-2]-[0-2]\\d|3[0-1]$"`
+	PurchaseTime string `regex:"^([01]\\d|2[0-3]):([0-5]\\d)$"`
 	Items        []Item
 	Total        string `regex:"^\\d+\\.\\d{2}$"`
 }
@@ -79,9 +83,100 @@ func (i *InMemoryReceiptStore) ProcessReceipt(id uuid.UUID, body io.Reader) erro
 			return err
 		}
 	}
-
-	i.receipts[id] = ReceiptScore{Id: id, Receipt: receipt, Points: 5}
+	points := calculatePoints(receipt)
+	i.receipts[id] = ReceiptScore{Id: id, Receipt: receipt, Points: points}
 	return nil
+}
+
+func calculatePoints(receipt Receipt) int {
+	sum := 0
+	sum += namePoints(receipt.Retailer)
+	sum += roundDollarPoints(receipt.Total)
+	sum += multiplesOfQuartersPoints(receipt.Total)
+	sum += itemPairPoints(len(receipt.Items))
+	sum += itemPoints(receipt.Items)
+	sum += purchaseDatePoints(receipt.PurchaseDate)
+	sum += purchaseTimePoints(receipt.PurchaseTime)
+	return sum
+}
+
+func namePoints(name string) int {
+	total := 0
+	for _, char := range name {
+		if unicode.IsLetter(char) || unicode.IsDigit(char) {
+			total += 1
+		}
+	}
+	return total
+}
+
+func roundDollarPoints(total string) int {
+	if total[len(total)-2:] == "00" {
+		return 50
+	}
+	return 0
+}
+
+func multiplesOfQuartersPoints(total string) int {
+	float, err := strconv.ParseFloat(total, 32)
+	if err != nil {
+		return 0
+	}
+	num := int(float * 100)
+	if num%25 == 0 {
+		return 25
+	}
+	return 0
+}
+
+func itemPairPoints(count int) int {
+	return count / 2 * 5
+}
+
+func itemPoints(items []Item) int {
+	total := 0
+	for _, item := range items {
+		total += itemDescriptionPoints(item)
+	}
+	return total
+}
+
+func itemDescriptionPoints(item Item) int {
+	trimmedLength := len(strings.Trim(item.ShortDescription, " "))
+	if trimmedLength%3 == 0 {
+		itemPrice, err := strconv.ParseFloat(item.Price, 32)
+		if err != nil {
+			return 0
+		}
+		return int(math.Ceil(itemPrice * 0.2))
+	} else {
+		return 0
+	}
+}
+
+func purchaseDatePoints(date string) int {
+	dayString := date[len(date)-2:]
+	day, err := strconv.Atoi(dayString)
+	if err != nil {
+		return 0
+	}
+	if day%2 == 0 {
+		return 0
+	}
+	return 6
+}
+
+func purchaseTimePoints(time string) int {
+	hour := time[:2]
+	if hour == "14" || hour == "15" {
+		minutes := time[3:]
+		if hour == "14" && minutes == "00" {
+			return 0
+		} else {
+			return 10
+		}
+	}
+	return 0
 }
 
 // used to validate the regex tags on Receipt and Item
