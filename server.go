@@ -78,6 +78,7 @@ func (rs *ReceiptServer) processReceipt(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	w.Header().Set("Content-Type", jsonContentType)
 	uuid := ID{id}
 	err = json.NewEncoder(w).Encode(uuid)
 
@@ -86,6 +87,4 @@ func (rs *ReceiptServer) processReceipt(w http.ResponseWriter, r *http.Request) 
 		log.Println(err)
 		return
 	}
-
-	w.Header().Set("Content-Type", jsonContentType)
 }
