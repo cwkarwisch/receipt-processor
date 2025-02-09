@@ -291,6 +291,27 @@ func TestProcessReceipt(t *testing.T) {
 		assertResponseBody(t, response.Body.String(), badRequestMessage+"\n")
 	})
 
+	t.Run("rejects receipt with invalid day in date format", func(t *testing.T) {
+		receiptJson = `{
+			"retailer": "Walgreens",
+			"purchaseDate": "2022-03-50",
+			"purchaseTime": "08:13",
+			"total": "3.15",
+			"items": [
+				{"shortDescription": "Pepsi - 12-oz", "price": "1.25"},
+				{"shortDescription": "Dasani", "price": "1.40"}
+			]
+		}`
+
+		request := newPostReceiptRequest(receiptJson)
+		response := httptest.NewRecorder()
+
+		server.ServeHTTP(response, request)
+
+		assertResponseCode(t, response.Code, http.StatusBadRequest)
+		assertResponseBody(t, response.Body.String(), badRequestMessage+"\n")
+	})
+
 	t.Run("rejects receipt with 00 month in date format", func(t *testing.T) {
 		receiptJson = `{
 			"retailer": "Walgreens",

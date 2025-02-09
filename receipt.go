@@ -24,7 +24,7 @@ type ReceiptScore struct {
 
 type Receipt struct {
 	Retailer     string `regex:"^[\\w\\s\\-&]+$"`
-	PurchaseDate string `regex:"^\\d{4}-0[1-9]|1[1-2]-[0-2]\\d|3[0-1]$"`
+	PurchaseDate string `regex:"^\\d{4}-(0[1-9]|1[0-2])-([0-2]\\d|3[0-1])$"`
 	PurchaseTime string `regex:"^([01]\\d|2[0-3]):([0-5]\\d)$"`
 	Items        []Item
 	Total        string `regex:"^\\d+\\.\\d{2}$"`
