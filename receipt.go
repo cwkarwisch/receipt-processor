@@ -3,7 +3,10 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"reflect"
+	"regexp"
 	"sync"
 
 	"github.com/google/uuid"
@@ -16,16 +19,16 @@ type ReceiptScore struct {
 }
 
 type Receipt struct {
-	Retailer     string
+	Retailer     string `regex:"^[\\w\\s\\-&]+$"`
 	PurchaseDate string
 	PurchaseTime string
 	Items        []Item
-	Total        string
+	Total        string `regex:"^\\d+\\.\\d{2}$"`
 }
 
 type Item struct {
-	ShortDescription string
-	Price            string
+	ShortDescription string `regex:"^[\\w\\s\\-]+$"`
+	Price            string `regex:"^\\d+\\.\\d{2}$"`
 }
 
 type InMemoryReceiptStore struct {
@@ -56,8 +59,52 @@ func (i *InMemoryReceiptStore) ProcessReceipt(id uuid.UUID, body io.Reader) erro
 	err := json.NewDecoder(body).Decode(&receipt)
 
 	if err != nil {
-		return errors.New("could not decode request body")
+		return err
 	}
+
+	err = validateStruct(receipt)
+
+	if err != nil {
+		return err
+	}
+
+	if len(receipt.Items) == 0 {
+		return errors.New("no items included on receipt")
+	}
+
+	for _, item := range receipt.Items {
+		err = validateStruct(item)
+
+		if err != nil {
+			return err
+		}
+	}
+
 	i.receipts[id] = ReceiptScore{Id: id, Receipt: receipt, Points: 5}
+	return nil
+}
+
+// used to validate the regex tags on Receipt and Item
+func validateStruct[T any](data T) error {
+	val := reflect.ValueOf(data)
+
+	for i := 0; i < val.NumField(); i++ {
+		field := val.Type().Field(i)
+		regexTag := field.Tag.Get("regex")
+		if regexTag == "" {
+			continue
+		}
+
+		regex, err := regexp.Compile(regexTag)
+		if err != nil {
+			return fmt.Errorf("invalid regex %q in field %q: %v", regexTag, field.Name, err)
+		}
+
+		fieldValue := val.Field(i).String()
+		if !regex.MatchString(fieldValue) {
+			return fmt.Errorf("field %q value %q does not meet regex %q", field.Name, fieldValue, regexTag)
+		}
+	}
+
 	return nil
 }

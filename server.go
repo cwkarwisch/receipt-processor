@@ -3,12 +3,15 @@ package main
 import (
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 
 	"github.com/google/uuid"
 )
 
 const jsonContentType = "application/json"
+const notFoundMessage = "No receipt found for that ID."
+const badRequestMessage = "The receipt is invalid."
 
 // used to encode the response to the POST /receipts/process route
 type ID struct {
@@ -46,18 +49,21 @@ func (rs *ReceiptServer) getReceiptPointsTotal(w http.ResponseWriter, r *http.Re
 	id := r.PathValue("id")
 	uuid, err := uuid.Parse(id)
 	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
+		http.Error(w, notFoundMessage, http.StatusNotFound)
+		log.Println(err)
 		return
 	}
 	points, err := rs.store.GetPoints(uuid)
 	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
+		http.Error(w, notFoundMessage, http.StatusNotFound)
+		log.Println(err)
 		return
 	}
 	w.Header().Set("Content-Type", jsonContentType)
 	err = json.NewEncoder(w).Encode(Points{points})
 	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
+		http.Error(w, notFoundMessage, http.StatusNotFound)
+		log.Println(err)
 		return
 	}
 }
@@ -67,11 +73,19 @@ func (rs *ReceiptServer) processReceipt(w http.ResponseWriter, r *http.Request) 
 	err := rs.store.ProcessReceipt(id, r.Body)
 
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		http.Error(w, badRequestMessage, http.StatusBadRequest)
+		log.Println(err)
 		return
 	}
 
 	uuid := ID{id}
-	json.NewEncoder(w).Encode(uuid)
+	err = json.NewEncoder(w).Encode(uuid)
+
+	if err != nil {
+		http.Error(w, badRequestMessage, http.StatusBadRequest)
+		log.Println(err)
+		return
+	}
+
 	w.Header().Set("Content-Type", jsonContentType)
 }

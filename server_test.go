@@ -84,7 +84,7 @@ func TestGetReceiptPoints(t *testing.T) {
 		server.ServeHTTP(response, request)
 
 		assertResponseCode(t, response.Code, http.StatusNotFound)
-		assertEmptyResponse(t, response.Body)
+		assertResponseBody(t, response.Body.String(), notFoundMessage+"\n")
 	})
 }
 
@@ -122,6 +122,103 @@ func TestProcessReceipt(t *testing.T) {
 			t.Errorf("ReceiptScore did not properly record receipt ID")
 		}
 	})
+
+	t.Run("rejects receipt with missing retailer", func(t *testing.T) {
+		receiptJson = `{
+			"retailer": "",
+			"purchaseDate": "2022-01-02",
+			"total": "3.29",
+			"items": [
+				{"shortDescription": "Pepsi - 12-oz", "price": "1.25"},
+				{"shortDescription": "Dasani", "price": "1.40"}
+			]
+		}`
+
+		request := newPostReceiptRequest(receiptJson)
+		response := httptest.NewRecorder()
+
+		server.ServeHTTP(response, request)
+
+		assertResponseCode(t, response.Code, http.StatusBadRequest)
+		assertResponseBody(t, response.Body.String(), badRequestMessage+"\n")
+	})
+
+	t.Run("rejects receipt with missing items", func(t *testing.T) {
+		receiptJson = `{
+			"retailer": "Walgreens",
+			"purchaseDate": "2022-01-02",
+			"total": "3.29"
+		}`
+
+		request := newPostReceiptRequest(receiptJson)
+		response := httptest.NewRecorder()
+
+		server.ServeHTTP(response, request)
+
+		assertResponseCode(t, response.Code, http.StatusBadRequest)
+		assertResponseBody(t, response.Body.String(), badRequestMessage+"\n")
+	})
+
+	t.Run("rejects receipt with invalid formatting for a field", func(t *testing.T) {
+		receiptJson = `{
+			"retailer": "Walgreens",
+			"purchaseDate": "2022-01-02",
+			"purchaseTime": "08:13",
+			"total": "3",
+			"items": [
+				{"shortDescription": "Pepsi - 12-oz", "price": "1.25"},
+				{"shortDescription": "Dasani", "price": "1.40"}
+			]
+		}`
+
+		request := newPostReceiptRequest(receiptJson)
+		response := httptest.NewRecorder()
+
+		server.ServeHTTP(response, request)
+
+		assertResponseCode(t, response.Code, http.StatusBadRequest)
+		assertResponseBody(t, response.Body.String(), badRequestMessage+"\n")
+	})
+
+	t.Run("rejects receipt with missing short description", func(t *testing.T) {
+		receiptJson = `{
+			"retailer": "Walgreens",
+			"purchaseDate": "2022-01-02",
+			"total": "3.29",
+			"items": [
+				{"shortDescription": "", "price": "1.25"},
+				{"shortDescription": "Dasani", "price": "1.40"}
+			]
+		}`
+
+		request := newPostReceiptRequest(receiptJson)
+		response := httptest.NewRecorder()
+
+		server.ServeHTTP(response, request)
+
+		assertResponseCode(t, response.Code, http.StatusBadRequest)
+		assertResponseBody(t, response.Body.String(), badRequestMessage+"\n")
+	})
+
+	t.Run("rejects receipt with missing item price", func(t *testing.T) {
+		receiptJson = `{
+			"retailer": "Walgreens",
+			"purchaseDate": "2022-01-02",
+			"total": "3.29",
+			"items": [
+				{"shortDescription": "Pepsi - 12-oz", "price": "1.25"},
+				{"shortDescription": "Dasani", "price": ""}
+			]
+		}`
+
+		request := newPostReceiptRequest(receiptJson)
+		response := httptest.NewRecorder()
+
+		server.ServeHTTP(response, request)
+
+		assertResponseCode(t, response.Code, http.StatusBadRequest)
+		assertResponseBody(t, response.Body.String(), badRequestMessage+"\n")
+	})
 }
 
 func newPostReceiptRequest(receipt string) *http.Request {
@@ -134,6 +231,13 @@ func newGetPointsRequest(id uuid.UUID) *http.Request {
 	path := "/receipts/" + id.String() + "/points"
 	req, _ := http.NewRequest(http.MethodGet, path, nil)
 	return req
+}
+
+func assertResponseBody(t testing.TB, body, expected string) {
+	t.Helper()
+	if body != expected {
+		t.Errorf("expected response body of %q but got %q", expected, body)
+	}
 }
 
 func assertPointTotalInResponse(t testing.TB, response *httptest.ResponseRecorder, expected int) {
@@ -159,13 +263,6 @@ func assertResponseCode(t testing.TB, got, want int) {
 	t.Helper()
 	if got != want {
 		t.Errorf("expect response code of %d but got %d", want, got)
-	}
-}
-
-func assertEmptyResponse(t testing.TB, body *bytes.Buffer) {
-	t.Helper()
-	if body.Len() != 0 {
-		t.Errorf("expected empty response body but receievd a body in the response")
 	}
 }
 
